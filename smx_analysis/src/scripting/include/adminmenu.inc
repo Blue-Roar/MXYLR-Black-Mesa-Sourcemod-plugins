@@ -134,7 +134,7 @@ stock bool RedisplayAdminMenu(Handle topmenu, int client)
 public SharedPlugin __pl_adminmenu = 
 {
 	name = "adminmenu",
-	file = "BMAG.smx",
+	file = "adminmenu.smx",
 #if defined REQUIRE_PLUGIN
 	required = 1,
 #else

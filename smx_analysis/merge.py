@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Merge 35 enabled server plugins into a single .sp / .smx."""
+"""Merge the 16 enabled server plugins into a single .sp / .smx.
+
+BMAG deliberately contains NO SourceMod stock plugin: the official plugins in
+the server's plugins/ directory (admin-flatfile, adminmenu, adminhelp, basechat,
+basecomm, basecommands, basevotes, clientprefs, mapchooser, rockthevote, ...)
+are the operator's own install and are left completely untouched.  Do not re-add
+one of them to MODULES without checking its native provider: a merged module
+whose natives come from a plugin that is also loaded separately double-registers
+its commands, and one whose natives come from a plugin nobody loads makes
+BMAG.smx fail to load.
+
+The only natives BMAG still resolves against something outside itself are core
+natives and extension natives (clientprefs.ext, geoip.ext, sdktools.ext,
+sdkhooks.ext, socket.ext) plus the mapchooser *plugin* library, which is a soft
+dependency on purpose - see the preamble assembly in run()."""
 import os
 import re
 
@@ -11,24 +25,35 @@ OUT_DIR = os.path.join(SRC, "BMAG")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 MODULES = [
-    "admincheats", "admin-flatfile", "adminhelp", "adminmenu", "advertisements",
-    "adv-weapon_cleaner", "antiflood", "basechat", "basecomm", "basecommands",
-    "basetriggers", "basevotes", "clientprefs", "connectmessage", "fast_spawn",
-    "funcommands", "funvotes", "mapchooser", "missing_viewmodel_fix", "motd-fixer",
-    "nominations", "pause", "playercommands", "reservedslots", "rockthevote",
-    "showhealth", "sm_noearbleed", "sounds", "SpecDetails",
-    "speclist", "sql-admin-manager", "teamjoinblocker",
+    "admincheats", "advertisements",
+    "adv-weapon_cleaner",
+    "connectmessage", "fast_spawn",
+    "missing_viewmodel_fix", "motd-fixer",
+    "pause", "showhealth", "sm_noearbleed",
+    "SpecDetails",
+    "speclist", "teamjoinblocker",
     "bms_match", "textmsg_fix", "spawn_distribute",
 ]
 
-API_INCLUDES = ["adminmenu", "topmenus", "mapchooser"]
+# Includes whose *natives* are provided by a SourceMod stock plugin that BMAG
+# merges in.  Every one of these plugins is external now, so no native is
+# redirected any more and this stays empty.  Adding a stock plugin back to
+# MODULES means listing its include here again (the merged build then calls the
+# in-plugin function directly instead of going through a native).
+API_INCLUDES = []
 
-# plugin-provided forwards whose in-merge implementors need direct-call bridging
+# Plugin-library forwards whose *in-merge* implementors need direct-call
+# bridging (the provider module does Call_StartForward, the implementor lives in
+# another module of the same plugin).  Inert while no stock plugin is merged:
+# the only implementors these ever had (basecomm's OnAdminMenuReady,
+# nominations' OnNominationRemoved) are external now, so the provider's own
+# global forward reaches them normally.
 PLUGIN_FORWARDS = {
     "OnAdminMenuReady": "adminmenu",
     "OnNominationRemoved": "mapchooser",
 }
 
+# Bridge ordering for the modules above; inert while none of them is merged.
 SPECIAL_ORDER = ["adminmenu", "topmenus", "mapchooser"]
 
 # bms_match implements its SM lifecycle forwards with a Bms_ prefix (e.g.
@@ -494,6 +519,19 @@ def run():
         print("processed %s (%d syms)" % (mod, len(PRE[mod]["syms"])))
 
     # phase 4: assemble BMAG.sp
+    #
+    # Include policy: BMAG must not hard-depend on any SourceMod *plugin*.
+    # <adminmenu>/<topmenus> are gone (their only consumer, basecomm, is
+    # external now), so no SharedPlugin block asks for "adminmenu" any more.
+    # <mapchooser> stays because advertisements calls EndOfMapVoteEnabled() /
+    # HasEndOfMapVoteFinished(), but mapchooser.smx ships inside SourceMod's
+    # plugins/disabled/ - with REQUIRE_PLUGIN defined its SharedPlugin block
+    # would be required = 1 and BMAG would refuse to load for anyone who has not
+    # enabled it.  Undefining it flips the block to required = 0 and lets the
+    # include emit __pl_mapchooser_SetNTVOptional(), which marks all nine
+    # mapchooser natives optional; advertisements already guards every call
+    # behind LibraryExists("mapchooser").  Restore the define right after so the
+    # change stays scoped to this one include.
     parts = [
         "#pragma semicolon 1\n"
         "#pragma newdecls required\n"
@@ -501,11 +539,14 @@ def run():
         "#include <sdktools>\n"
         "#include <sdkhooks>\n"
         "#include <admin>\n"
-        "#include <adminmenu>\n"
-        "#include <topmenus>\n"
         "#include <clientprefs>\n"
         "#include <geoip>\n"
+        "\n"
+        "// Soft plugin dependency - see merge.py preamble comments.\n"
+        "#undef REQUIRE_PLUGIN\n"
         "#include <mapchooser>\n"
+        "#define REQUIRE_PLUGIN\n"
+        "\n"
         "#include <nextmap>\n"
         "\n"
         "#define AUTOLOAD_EXTENSIONS\n"

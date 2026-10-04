@@ -90,7 +90,7 @@ native bool BaseComm_SetClientMute(int client, bool muteState);
 public SharedPlugin __pl_basecomm = 
 {
 	name = "basecomm",
-	file = "BMAG.smx",
+	file = "basecomm.smx",
 #if defined REQUIRE_PLUGIN
 	required = 1,
 #else

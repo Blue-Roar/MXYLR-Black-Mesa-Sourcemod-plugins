@@ -5,13 +5,23 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 
 | 部分 | 内容 | 从哪看 |
 |---|---|---|
-| **① 死亡竞赛服务器**(主体) | 35 个 SourceMod 模块合并编译成单个 `BMAG.smx`,另有 4 个独立第三方插件单独加载 | [目录结构](#目录结构) · [部署](#部署) · [从源码构建](#五从源码构建) |
+| **① 死亡竞赛服务器**(主体) | 16 个模块合并编译成单个 `BMAG.smx`(全是自研 / 第三方,**不含任何 SourceMod 官方插件**),另有 4 个独立第三方插件单独加载 | [目录结构](#目录结构) · [部署](#部署) · [从源码构建](#五从源码构建) |
 | **② 单人战役插件** | 让单人剧情的 tau 炮拿到多人模式能力(`campaign/tau_mp/`)、溅射半径还原 HL1(`campaign/hl1tau/`) | [四、独立插件](#四独立插件) |
 | **③ 配置备份** | 服务器 `cfg/`、SourceMod `configs/`、MOTD 页面 | [⚠️ 部署前必改清单](#️-部署前必改清单) |
 
 > **想直接开服** → 先过一遍 [⚠️ 部署前必改清单](#️-部署前必改清单):配置里还带着原服的服务器名、群号、域名和占位 SteamID。
-> **想改插件** → [五、从源码构建](#五从源码构建),`merge.py` 把 35 个模块合并成一个 `BMAG.sp` 再交给 spcomp 编译。
+> **想改插件** → [五、从源码构建](#五从源码构建),`merge.py` 把 16 个模块合并成一个 `BMAG.sp` 再交给 spcomp 编译。
 > **只想抄某个功能** → [一、`bms_match`](#一bms_match--比赛插件自研) 是自研比赛插件,[二、其它自研模块](#二其它自研--深度改造模块) 列了 9 个深度改造模块。
+
+> **2026-10-04 第二批清理**:BMAG 里原先整合的 **19 个 SourceMod 官方插件已全部移出**
+> (35 模块 → 16 模块),**官方插件由用户自己的 SourceMod 安装提供**,详见
+> [三、官方插件:全部交给用户自己装](#三官方插件全部交给用户自己装)。这样做是为了**部署零冲突** ——
+> 把 `BMAG.smx` 丢进原始 SourceMod 安装即可,不需要停用任何官方插件。
+> 移出模块的**源码仍留在 `smx_analysis/src/scripting/plugins/` 下**,重新并入的做法与坑见该节末尾。
+>
+> 移出的 19 个里,**18 个与上游官方源码逐字节一致**(当初只是整合进来、没动过);
+> 唯一被本地改过的是 `basetriggers`(1 行:上游挂 `game_start`,本仓库改成 `round_start` 以适配 Black Mesa)。
+> `pause` / `showhealth` / `sm_noearbleed` 这三个**本来就不是官方插件**,保留在 BMAG 内。
 
 源码、合并器与逆向笔记全部在本仓库内,可直接重建。
 
@@ -34,7 +44,7 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 - [权限标志](#权限标志)
 - [一、`bms_match` — 比赛插件(自研)](#一bms_match--比赛插件自研)
 - [二、其它自研 / 深度改造模块](#二其它自研--深度改造模块)
-- [三、SourceMod 官方模块](#三sourcemod-官方模块)
+- [三、官方插件:全部交给用户自己装](#三官方插件全部交给用户自己装)
 - [四、独立插件](#四独立插件)
 - [五、从源码构建](#五从源码构建)
 - [六、已知问题](#六已知问题)
@@ -56,8 +66,8 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 | `cfg/server.cfg` | `sv_downloadurl`、`sm_motd_url` | 换成你的域名;**没有 FastDL 就把 `sv_downloadurl` 整行注释掉**(玩家回退 srcds 直传,慢但能连)。`sm_motd_url` 需由插件创建才生效 —— 见[已知问题](#六已知问题) |
 | `cfg/server.cfg` | `is_weaponfix_saddr` | 填**外网玩家能连到的**公网 `IP:端口`,不能留 `127.0.0.1`,否则武器动画修复静默失效 |
 | `cfg/server.cfg` | `rcon_password` | **该文件里没有这一行**,需自行在启动参数加 `+rcon_password "你的密码"`,且**绝不要提交进 git** |
-| `configs/admins.cfg` | `identity`(两条 `STEAM_0:x:1000000xx`) | 换成真实 SteamID,否则你没有任何管理员权限 |
-| `configs/databases.cfg` | **本仓库没有这个文件** | 只有 `clientprefs`、SQL 管理员等用到数据库时才需要自建(里面是数据库密码,故意不入库) |
+| `configs/admins.cfg` | `identity`(两条 `STEAM_0:x:1000000xx`) | 换成真实 SteamID,否则你没有任何管理员权限。读取这个文件的是官方插件 `admin-flatfile.smx`(SourceMod 自带、默认启用),**BMAG 不参与** —— 只要没把它停用就正常生效 |
+| `configs/databases.cfg` | **本仓库没有这个文件** | 只有 `clientprefs` 用到数据库时才需要自建(里面是数据库密码,故意不入库) |
 | `configs/advertisements.txt` | 两条 `chat` 文案 | 原服的群号和 B 站账号,换成你的 |
 | `smx_analysis/src/scripting/configs/bms_match.cfg` | `SourceTV` → `DownloadBase` | 改成你的地址,或留空 `""`(录像仍会录,只是下载链接不可用) |
 | `smx_analysis/src/scripting/cfg/mapcycle_*.txt` | 地图名单 | 删掉你服务器上**没有**的地图,否则换图失败 |
@@ -84,15 +94,15 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 
 ```
 ├── plugins/                      服务器 plugins/ 目录的备份(部署产物)
-│   ├── BMAG.smx                  35 模块合一插件 = 本仓库的主要产物
+│   ├── BMAG.smx                  16 模块合一插件 = 本仓库的主要产物
 │   ├── bms_rpgReloadFix.smx      第三方:RPG 换弹修复
 │   ├── bms_weapon_tauStuckFix.smx 第三方:tau 低弹药卡枪修复
 │   ├── is_weaponfx.smx           第三方:武器动画预热
 │   ├── is_bms_fix_timelimit.smx  第三方:回合时限/倒计时修复(bms_match 的计时器沿用同一机制)
-│   └── disabled/                 停用插件(basebans、nextmap、randomcycle、spawn_marker、
-│                                 classicmovement、sm_realbhop、xms、admin-sql-* 等 9 个)
+│   └── disabled/                 停用插件(nextmap、spawn_marker、classicmovement、
+│                                 sm_realbhop、xms 共 5 个)
 ├── smx_analysis/                 构建流水线与源码
-│   ├── merge.py                  把 35 个模块源码合并成 BMAG.sp(唯一的构建入口)
+│   ├── merge.py                  把 16 个模块源码合并成 BMAG.sp(唯一的构建入口)
 │   ├── fix_merge.py              merge.py 的补丁工具
 │   ├── sig_check.py              签名抗重定位校验(见"从源码构建")
 │   ├── rcon.py                   RCON 调试客户端(凭据走环境变量)
@@ -110,7 +120,8 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 │   ├── .gitignore                本目录的忽略规则
 │   └── src/scripting/
 │       ├── plugins/              模块源码 + 未编入 BMAG 的独立插件源码
-│       ├── include/              编译用 SourceMod include(与生产服务器版本一致)
+│       ├── include/              编译用 SourceMod include(与官方包逐字节一致;
+│       │                         另有官方包没有的 dhooks.inc、updater.inc)
 │       ├── BMAG/                 merge.py 产物(BMAG.sp 与各模块副本为生成物不入库,BMAG.smx 入库)
 │       ├── compile_all.sh        逐个编译 plugins/*.sp 的批处理脚本(路径硬编码,见上)
 │       ├── configs/              插件配置(bms_match.cfg、bms_webpanel.html)
@@ -174,6 +185,11 @@ copy /Y smx_analysis\src\scripting\cfg\*.txt             %SRV%\bms\cfg\
 copy /Y smx_analysis\src\scripting\cfg\*.cfg             %SRV%\bms\cfg\
 ```
 
+> **部署前提:一份正常的 SourceMod 安装。** `BMAG.smx` 里没有任何官方插件,管理员、聊天命令、
+> 禁言禁麦、投票、娱乐命令等全部由你 `addons/sourcemod/plugins/` 里的官方 `.smx` 提供 ——
+> **保持它们原样即可,不需要停用任何一个**(BMAG 与它们零重叠)。哪些官方插件提供什么功能,
+> 见 [三、官方插件:全部交给用户自己装](#三官方插件全部交给用户自己装)。
+
 > 除 `BMAG.smx` 外的四个 `.smx` 是**独立第三方插件,不在 BMAG 里,必须单独拷**(清单见
 > [四、独立插件](#四独立插件))。其中 `is_weaponfx.smx` 还需在 `server.cfg` 里显式设
 > `is_weaponfix_saddr`(默认值会被当成"未配置"而自我禁用);`is_bms_fix_timelimit.smx`
@@ -184,9 +200,10 @@ copy /Y smx_analysis\src\scripting\cfg\*.cfg             %SRV%\bms\cfg\
 > 漏了的话聊天框里所有 `[比赛]` 提示都会显示成短语键名。改文案(不动代码)
 > 只需重传这三个文件 + 换图或 `sm plugins reload BMAG`,不必重新编译。
 
-> **另:SourceMod 全新安装自带的 `plugins/nextmap.smx` 要停用**(移到 `plugins/disabled/`)。
+> **唯一一条与官方插件的功能性(非冲突性)取舍:`plugins/nextmap.smx` 建议停用**。
 > 本服换图由 `bms_match` 的投票 + 核心的 `sm_nextmap` 决定;nextmap 插件会按 `mapcyclefile`
-> 自动推进 `sm_nextmap`,和投票结果打架。仓库里那份就在 `plugins/disabled/nextmap.smx`。
+> 自动推进 `sm_nextmap`,和投票结果打架。它不影响加载,只是会让 `sm_nextmap` 被偷偷改掉 ——
+> 要不要停用取决于你。仓库里那份就在 `plugins/disabled/nextmap.smx`。
 > (注:`SetNextMap` / `GetNextMap` 是 **SourceMod 核心**提供的 native,不是 nextmap.smx ——
 > 所以停用它**不会**让 BMAG 加载失败。)
 
@@ -262,6 +279,11 @@ RCON_HOST=127.0.0.1 RCON_PORT=27015 RCON_PASSWORD='<你的rcon密码>' python sm
 | `!pause` / `!unpause` | 暂停 / 继续服务器 |
 | `!panel` / `!webpanel` | 打开游戏内网页控制台(见下) |
 | `!vguitest` | 弹出测试用 VGUI 面板(比分板/隐藏变体,调试用) |
+
+> `!pause` / `!unpause` 分两种情形:**比赛内**由 `bms_match` 自己接管(它直接发
+> `ServerCommand("pause")` 并同步比赛状态机);**非比赛状态**下 `bms_match` 放行,由 SourceMod 核心
+> 把 `!pause` 转成 `sm_pause` 交给 `pause` 模块(第三方插件 ddhoward `[Any?] Pause The Game`,
+> 仍嵌在 `BMAG.smx` 内)。两者不要混用。
 
 **聊天别名**:`!stop` → `!cancel`、`!join` → 加入人数较少的队伍、`!spec` → 观战、
 `!next <图>` → `!runnext <图>`、`!random` → `!runrandom`。
@@ -434,48 +456,109 @@ BM 引擎原生的复活点选择链已损坏(`IsSpawnPointValid` 不读标旗�
 ### `sm_noearbleed` — 去除耳鸣/压耳声
 
 无命令,仅 `sm_noearbleed_version`。挂 `OnTakeDamage` 把 `DMG_BLAST` 改成 `DMG_GENERIC` 以去掉爆炸耳鸣效果(不改伤害数值)。
+来源:GitHub `foobarhl/sourcemod` —— 第三方社区插件,**不是 SourceMod 官方插件**,上游官方包里没有对应源码。
 
 ---
 
-## 三、SourceMod 官方模块
+## 三、官方插件:全部交给用户自己装
 
-下面 25 个模块绝大多数是 SourceMod 自带的官方插件(少数为社区插件,如 `connectmessage`、
-`showhealth`、`teamjoinblocker`),同样**都编译在 `BMAG.smx` 内部**,不能单独加载。
+### 设计原则
 
-它们的**命令与 ConVar 全部是 SourceMod 上游默认值**。本服 `cfg/server.cfg` 里针对插件 ConVar
-只额外设了 `sm_fastspawn`、`sm_fastspawn_time`、`sm_advertisements_interval` 三项,且都属
-[第二节](#二其它自研--深度改造模块)的模块(另有几条没有任何模块提供的设置,见[已知问题](#六已知问题)),
-所以这里不再逐条抄表 —— 要查某个命令属于哪个模块、什么权限、什么默认值,
-直接看 `smx_analysis/src/scripting/plugins/<模块>.sp`,或 SourceMod 官方 wiki。
-下表只列**模块作用**与**本服的偏离点**。
+**`BMAG.smx` 里不包含任何一个 SourceMod 官方插件。** 官方插件(admin-flatfile、adminmenu、
+adminhelp、basechat、basecomm、basecommands、basevotes、funcommands、playercommands、
+rockthevote、mapchooser、clientprefs、antiflood、sounds、reservedslots、sql-admin-manager、
+admin-sql-*、nominations、randomcycle、basebans …)**由用户自己的 SourceMod 安装提供**,
+本仓库不重复打包。
 
-| 模块 | 作用 | 本服注意 |
+这样做的好处是**部署零冲突**:把 `BMAG.smx` 丢进一个**原始的 SourceMod 安装**(官方插件该开的开着、
+该在 `plugins/disabled/` 的放着),不会出现同名命令被两边注册、admin 菜单分类重名之类的撞车,
+**不需要停用任何官方插件**。
+
+BMAG 只负责 SourceMod 不自带的那部分:自研模块([一](#一bms_match--比赛插件自研)、[二](#二其它自研--深度改造模块))
+与第三方插件(下表)。
+
+### 编在 `BMAG.smx` 里、且官方包没有的(6 个)
+
+| 模块 | 作用 | 备注 |
 |---|---|---|
-| `admin-flatfile` | 从 `configs/admins.cfg` / `admin_groups.cfg` / `admin_overrides.cfg` 读管理员 | 本服**唯一**的管理员来源(不用 SQL) |
-| `admincheats` | `sm_admin_cheats_level` 控制执行作弊命令所需权限 | |
-| `adminhelp` | `sm_help` / `sm_searchcmd` 查命令 | |
-| `adminmenu` | `sm_admin` 打开管理员菜单 | |
-| `antiflood` | 聊天刷屏限制(`sm_flood_time`) | |
-| `basechat` | 管理员聊天命令(`sm_say` / `sm_csay` / `sm_hsay` / `sm_msay` / `sm_tsay` / `sm_chat` / `sm_psay`) | 本服多处 `sm_say` 用来在开服时播报设置 |
-| `basecomm` | 禁言/禁麦(`sm_gag` / `sm_mute` / `sm_silence` 及解除) | **SourceBans 移除后,禁言禁麦仍由它提供,不受影响** |
-| `basecommands` | 基础管理命令(`sm_kick` / `sm_map` / `sm_rcon` / `sm_cvar` / `sm_execcfg` / `sm_cancelvote` / `sm_who` / `sm_reloadadmins` 等) | `rcon_password` 被本模块保护,禁止通过 `sm_cvar` 读取 |
-| `basetriggers` | 聊天触发词(`timeleft` / `nextmap` / `motd` / `ff`) | |
-| `basevotes` | 投票(`sm_vote` / `sm_voteban` / `sm_votekick` / `sm_votemap`) | `sm_voteban` 已改走 SourceMod 核心的**本地封禁**(写服务器自己的封禁名单),不再进 SourceBans 数据库 |
-| `clientprefs` | 客户端 cookie(`sm_cookies` / `sm_settings`) | 需要数据库才会持久化(见 `configs/databases.cfg`) |
+| `admincheats` | `sm_admin_cheats_level` 控制执行作弊命令所需权限 | 社区插件(devicenull),官方包不含 |
 | `connectmessage` | 玩家加入/离开时聊天框提示 | 社区插件 |
-| `funcommands` | 娱乐命令(`sm_beacon` / `sm_blind` / `sm_burn` / `sm_drug` / `sm_freeze` / `sm_gravity` / `sm_noclip` / 各种炸弹) | |
-| `funvotes` | 娱乐投票(`sm_votealltalk` / `sm_voteburn` / `sm_voteff` / `sm_votegravity` / `sm_voteslay`) | |
-| `mapchooser` | 结束换图投票、`sm_setnextmap` | **本服在 `OnConfigsExecuted` 里强制 `sm_mapvote_endvote 0`**,避免结束换图投票覆盖 `sm_nextmap` |
-| `motd-fixer` | 延时打开 MOTD(引擎自带 MOTD 触发有时序问题) | 社区插件 |
-| `nominations` | 地图提名(`sm_nominate`) | |
-| `pause` | 暂停/继续服务器(`sm_pause` / `sm_unpause` / `sm_setpause`) | 聊天里的 `!pause` / `!unpause` 由 `bms_match` 接管,两者不要混用 |
-| `playercommands` | `sm_slap` / `sm_slay` / `sm_rename` | |
-| `reservedslots` | 预留通道(`sm_reserve_*` / `sm_hide_slots`) | 本服 `maxplayers 8`,`sm_reserved_slots` 为 0(未启用预留) |
-| `rockthevote` | RTV 换图(`sm_rtv`) | |
-| `showhealth` | 屏幕上显示血量 | 社区插件 |
-| `sounds` | `sm_play` 播放声音 | |
-| `sql-admin-manager` | SQL 管理员增删改(`sm_sql_*`) | 本服管理员走 `admin-flatfile`,这些命令是备用 |
+| `motd-fixer` | 延时打开 MOTD(引擎自带 MOTD 触发有时序问题) | 社区插件;用 `clientprefs.ext` 的 cookie 记偏好 |
+| `pause` | 暂停/继续服务器(`sm_pause` / `sm_unpause` / `sm_setpause`) | **第三方插件**(ddhoward `[Any?] Pause The Game` 18.0114.0)。它只注册 `sm_*` 命令并挂引擎 `pause` 命令监听;聊天里的 `!pause` 由 **SourceMod 核心**把 `!x` 转成 `sm_x` 触发,不依赖 `basechat`。比赛内 `!pause` / `!unpause` 由 `bms_match` 接管,两者不要混用 |
+| `showhealth` | 屏幕上显示血量(`sm_show_health` / `sm_show_health_on_hit_only` / `sm_show_health_text_area`) | **第三方插件**;用 `clientprefs.ext` 的 cookie 记"关掉血量显示"的偏好 |
 | `teamjoinblocker` | 换边封锁(`sm_toggle_join` / `sm_a`) | 社区插件 |
+
+### 交给用户自己装的官方插件(19 个)
+
+以下模块原本嵌在 `BMAG.smx` 里,**现已全部移出**。源码保留在
+`smx_analysis/src/scripting/plugins/`(想重新合并的话见本节末尾的注意事项)。
+
+「官方包状态」一列指 SourceMod 官方压缩包里 `addons/sourcemod/plugins/` 的默认位置 ——
+**`plugins/` = 装完就启用**;**`plugins/disabled/` = 装完是停用的,要用得自己挪出来**。
+
+| 模块 | 提供什么 | 官方包状态 |
+|---|---|---|
+| `admin-flatfile` | 从 `configs/admins.cfg` 等读管理员 —— **本仓库的 `configs/` 就是给它用的,必须启用它才有管理员** | `plugins/` |
+| `adminhelp` | `sm_help` / `sm_searchcmd` | `plugins/` |
+| `adminmenu` | `sm_admin` 管理员菜单 | `plugins/` |
+| `antiflood` | 聊天刷屏限制(`sm_flood_time`) | `plugins/` |
+| `basechat` | `sm_say` / `sm_csay` / `sm_hsay` / `sm_msay` / `sm_tsay` / `sm_chat` / `sm_psay`(`cfg/server.cfg` 第 58 / 85 / 99 行用到 `sm_say`) | `plugins/` |
+| `basecomm` | 禁言/禁麦(`sm_gag` / `sm_mute` / `sm_silence` 及解除) | `plugins/` |
+| `basecommands` | `sm_kick` / `sm_map` / `sm_cvar` / `sm_rcon` / `sm_execcfg` / `sm_cancelvote` / `sm_who` / `sm_reloadadmins` | `plugins/` |
+| `basetriggers` | 聊天触发词(`timeleft` / `nextmap` / `motd` / `ff`) | `plugins/` |
+| `basevotes` | `sm_vote` / `sm_voteban` / `sm_votekick` / `sm_votemap` | `plugins/` |
+| `clientprefs` | 客户端 cookie 界面(`sm_cookies` / `sm_settings`) | `plugins/` |
+| `funcommands` | 娱乐命令(`sm_beacon` / `sm_blind` / `sm_burn` / `sm_drug` / `sm_freeze` / `sm_gravity` / `sm_noclip` 等) | `plugins/` |
+| `funvotes` | 娱乐投票(`sm_votealltalk` / `sm_voteburn` / `sm_voteff` / `sm_votegravity` / `sm_voteslay`) | `plugins/` |
+| `playercommands` | `sm_slap` / `sm_slay` / `sm_rename` | `plugins/` |
+| `reservedslots` | 预留通道(`sm_reserve_*` / `sm_hide_slots`) | `plugins/` |
+| `sounds` | `sm_play` 播放声音 | `plugins/` |
+| `mapchooser` | 结束换图投票、`sm_setnextmap` / `sm_mapvote`、`EndOfMapVoteEnabled()` 等 native | ⚠️ `plugins/disabled/` |
+| `nominations` | 地图提名(`sm_nominate`) | ⚠️ `plugins/disabled/` |
+| `rockthevote` | RTV 换图(`sm_rtv`) | ⚠️ `plugins/disabled/` |
+| `sql-admin-manager` | SQL 管理员增删改(`sm_sql_*`) | ⚠️ `plugins/disabled/` |
+
+> **只影响一个地方**:`advertisements` 会调 `EndOfMapVoteEnabled()` / `HasEndOfMapVoteFinished()`
+> 来避开结束换图投票。这两个 native 由 **`mapchooser.smx`** 提供,而它在官方包里默认停用 ——
+> 所以 `BMAG.smx` 把这条插件依赖做成了**软依赖**(见下),没启用 mapchooser 也能正常加载,
+> 只是 `advertisements` 的那段检查会被跳过。想让结束换图投票真正生效就把 `mapchooser.smx` 挪出来。
+
+### `BMAG.smx` 的依赖形态
+
+移出这 19 个之后,BMAG 对**插件**的依赖只剩一条,而且是软的:
+
+| 依赖 | 类型 | 说明 |
+|---|---|---|
+| `clientprefs.ext` / `geoip.ext` / `sdktools.ext` / `sdkhooks.ext` / `socket.ext` | 扩展,硬依赖 | SourceMod 自带,永远存在 |
+| `mapchooser` | 插件库,**软依赖**(`required = 0`) | `merge.py` 在 `#include <mapchooser>` 前 `#undef REQUIRE_PLUGIN`,使 `SharedPlugin` 块编译成 `required = 0` 并让 include 生成 `__pl_mapchooser_SetNTVOptional()`,把 9 个 mapchooser native 全部标记为可选 |
+
+核对方式(可复现):解压 `BMAG.smx` 的 section 后,`adminmenu` / `basecomm` / `topmenus`
+的引用数为 **0**,`__pl_mapchooser` 结构体里的 `required` 字段是 `0`,
+`GetAdminTopMenu` / `AddTargetsToMenu` / `BaseComm_*` 全部不再被引用。
+
+### `include/` 的三行本地补丁已还原
+
+`smx_analysis/src/scripting/include/` 过去有 **3 个文件各被改过 1 行** —— 把 `SharedPlugin` 的
+`file` 字段从官方名指向 `BMAG.smx`,因为当时这些 native 由 BMAG 自己提供:
+
+| 文件 | 曾经是 | 现在是(= 官方原文) |
+|---|---|---|
+| `adminmenu.inc` | `file = "BMAG.smx"` | `file = "adminmenu.smx"` |
+| `basecomm.inc` | `file = "BMAG.smx"` | `file = "basecomm.smx"` |
+| `mapchooser.inc` | `file = "BMAG.smx"` | `file = "mapchooser.smx"` |
+
+现在这三个插件都在 BMAG 之外,补丁已还原,**`include/` 与官方包逐字节一致**
+(只多出 `dhooks.inc`、`updater.inc` 两个官方包没有的 include)。
+
+> ⚠️ **把官方插件重新加回 `MODULES` 之前先读这段**。合并编译会把模块对
+> `adminmenu.inc` / `mapchooser.inc` native 的调用改写成对**同一插件内**对应模块函数的直接调用,
+> 这靠 `merge.py` 的 `API_INCLUDES` 驱动(现在是空列表)。要让某个官方插件重新并入,必须:
+> ① 把模块名加回 `MODULES`;② 把它的 include 名加回 `API_INCLUDES`;
+> ③ 把对应 `.inc` 的 `file` 字段改回 `"BMAG.smx"`;④ 确认没有同名官方 `.smx` 还开着。
+> 少做一步的后果:**编译照样通过,但 `BMAG.smx` 加载时找不到 native 而整插件失效**。
+
+> **`sm_cexec` 本来就不在本仓库里**:它既没有 `.sp` 源码也没有 `.smx`,
+> 与 `sm_blockcommand`、`sm_downloader_enabled`、`sm_motd_url` 一样属于原服插件集里没归档的那部分(见[已知问题](#六已知问题))。
 
 ---
 
@@ -521,18 +604,39 @@ tau 炮在单人战役里是"阉割版":没有高斯跳、副攻有硬直 ——
 
 ### 未编入 BMAG 的模块
 
-以下 7 个模块的源码保留在 `smx_analysis/src/scripting/plugins/`,但**不在 `merge.py` 的
-MODULES 列表中,不会编译进 `BMAG.smx`**:
+**共 26 个模块**的源码保留在 `smx_analysis/src/scripting/plugins/`,但**不在 `merge.py` 的
+MODULES 列表中,不会编译进 `BMAG.smx`**。前 7 个是历史上就没编进去的,后 19 个是
+2026-10-04 第二批清理时移出的官方插件(哪些官方 `.smx` 提供它们,见
+[三、官方插件:全部交给用户自己装](#三官方插件全部交给用户自己装)):
 
 | 模块 | 为什么不在 BMAG 里 |
 |---|---|
-| `basebans` | 封禁命令(本地封禁,不依赖数据库);需要时启用 `plugins/disabled/basebans.smx` |
-| `nextmap` | 换图由 `bms_match` 的投票 + SourceMod 核心的 `sm_nextmap` 负责 |
-| `randomcycle` | 同上,随机换图走 `bms_match` 的 `!runrandom` |
+| `basebans` | 封禁命令(本地封禁,不依赖数据库);**原先停放在 `plugins/disabled/basebans.smx` 的那份已随本次清理删除**,要用得自己重新编译 |
+| `nextmap` | 换图由 `bms_match` 的投票 + SourceMod 核心的 `sm_nextmap` 负责(源码保留,`plugins/disabled/nextmap.smx` 仍在) |
+| `randomcycle` | 同上,随机换图走 `bms_match` 的 `!runrandom`(`plugins/disabled/randomcycle.smx` 已删除) |
 | `spawn_cap` | 功能已被 `spawn_distribute` 取代(且原版会踢 bot) |
 | `spawn_marker` | 训练用工具,见上一节;默认停用 |
-| `admin-sql-prefetch` | SQL 管理员预取;本服管理员走 `admin-flatfile` |
-| `admin-sql-threaded` | SQL 管理员;同上 |
+| `admin-sql-prefetch` | SQL 管理员预取(该停用副本已删除) |
+| `admin-sql-threaded` | SQL 管理员(该停用副本已删除) |
+| `admin-flatfile` | 官方插件 —— 由用户自己的 SourceMod 提供(`plugins/`,默认启用) |
+| `adminhelp` | 官方插件(`plugins/`) |
+| `adminmenu` | 官方插件(`plugins/`) |
+| `antiflood` | 官方插件(`plugins/`) |
+| `basechat` | 官方插件(`plugins/`) |
+| `basecomm` | 官方插件(`plugins/`) |
+| `basecommands` | 官方插件(`plugins/`) |
+| `basetriggers` | 官方插件(`plugins/`);注意剔掉的这份带一处 Black Mesa 适配改动(`game_start` → `round_start`) |
+| `basevotes` | 官方插件(`plugins/`) |
+| `clientprefs` | 官方插件(`plugins/`);`motd-fixer` / `showhealth` 需要的 cookie native 其实来自 `clientprefs.ext`,不依赖这个插件 |
+| `funcommands` | 官方插件(`plugins/`) |
+| `funvotes` | 官方插件(`plugins/`) |
+| `mapchooser` | 官方插件(`plugins/disabled/`,默认停用);`advertisements` 对它的依赖已降为软依赖 |
+| `nominations` | 官方插件(`plugins/disabled/`) |
+| `playercommands` | 官方插件(`plugins/`) |
+| `reservedslots` | 官方插件(`plugins/`) |
+| `rockthevote` | 官方插件(`plugins/disabled/`) |
+| `sounds` | 官方插件(`plugins/`) |
+| `sql-admin-manager` | 官方插件(`plugins/disabled/`) |
 
 `plugins/disabled/` 里还有几个连源码都没有的: `classicmovement`(经典移动)、
 `sm_realbhop`(真 bhop)、`xms`(hl2dm 的比赛插件,`bms_match` 的参考实现)。
@@ -540,10 +644,15 @@ MODULES 列表中,不会编译进 `BMAG.smx`**:
 > **SourceBans++ 已移除(2026-10-04)**:`sbpp_*` 六个模块连同 `configs/sourcebans/` 和 `sourcebanspp.inc`
 > / `sourcecomms.inc` 一起从仓库删除,`BMAG.smx` 已重编译(41 → 35 个模块)。
 > **因此 BMAG 现在不再提供任何封禁命令**
-> (`sm_ban` / `sm_addban` / `sm_unban` / `sm_banip` 全部消失);禁言禁麦不受影响,仍由 `basecomm` 提供。
-> `basevotes` 的 `sm_voteban` 也还在,但它改走 SourceMod 核心的本地封禁(写进服务器自己的封禁名单),
-> 不再进 SourceBans 数据库。
-> 需要本地封禁命令的话,启用 `plugins/disabled/basebans.smx` 即可 —— 它是独立插件,不需要数据库。
+> (`sm_ban` / `sm_addban` / `sm_unban` / `sm_banip` 全部消失);**禁言禁麦不受影响** ——
+> 它由官方插件 `basecomm` 提供,而 `basecomm` 现在由用户自己的 SourceMod 安装加载,BMAG 不再参与。
+> 当时 `basevotes` 的 `sm_voteban` 也还在,但**已在第二批清理中随 `basevotes` 一起移出 BMAG**,
+> 所以 BMAG 自己不提供投票封禁(装官方 `basevotes.smx` 即可,默认就是启用的)。
+> 顺带更正一处旧描述:本仓库的 `basevotes/voteban.sp` 与上游
+> **逐字节一致**,它投票通过后只执行 `ServerCommand("kickid ...")`(踢人),**本来就不写封禁名单**
+> —— 早先 README 里"已改走 SourceMod 核心的本地封禁"的说法不成立。
+> 要真正的封禁功能,装 SourceBans++(第三方)或启用官方 `basebans.smx`
+> (它在官方包里默认启用,但本仓库 `plugins/disabled/basebans.smx` 那份副本已删除)。
 
 ---
 
@@ -551,7 +660,7 @@ MODULES 列表中,不会编译进 `BMAG.smx`**:
 
 ```bash
 cd smx_analysis
-python merge.py          # 生成 src/scripting/BMAG/BMAG.sp(35 模块合并)
+python merge.py          # 生成 src/scripting/BMAG/BMAG.sp(16 模块合并)
 ```
 
 然后用 spcomp 编译(编译器随仓库放在 `dl/sm-win/` 下):
@@ -563,8 +672,12 @@ python merge.py          # 生成 src/scripting/BMAG/BMAG.sp(35 模块合并)
   "src/scripting/BMAG/BMAG.sp"
 ```
 
-基线:**48 个警告、0 个错误**(删掉 SourceBans++ 之前是 50)。
+基线:**35 个警告、0 个错误**(第二批清理把官方插件移出后是 35,移出前是 48,
+删掉 SourceBans++ 之前是 50)。
 这套命令已于 2026-10-04 在本仓库复跑验证过,警告数与上述基线一致。
+
+> 编译产物要同时覆盖两处:`smx_analysis/src/scripting/BMAG/BMAG.smx`(构建输出)与
+> `plugins/BMAG.smx`(部署用副本),两者内容必须一致(2026-10-04 复核时两者 SHA256 相同)。
 
 > `src/scripting/compile_all.sh` 是构建者留下的"逐个编译 `plugins/*.sp`"批处理脚本,
 > 里面的 `SPCOMP` 路径硬编码成 `/c/tmp/smx_analysis/...`,**在本仓库里并不存在**,
@@ -591,4 +704,12 @@ python merge.py          # 生成 src/scripting/BMAG/BMAG.sp(35 模块合并)
 - **`cfg/server.cfg` 里有 3 条没有任何模块提供的设置**:`sm_blockcommand "spec_mode 7"`、`sm_downloader_enabled "1"`、`sm_motd_url "..."` —— 全仓库(连自带的 SourceMod 官方包 `smx_analysis/dl/`)都搜不到创建它们的代码,应是原服插件集里没随仓库一起归档的那部分留下的。
   - 前两条会在开服日志里报 `Unknown command`,**不影响运行**,可删可留。
   - `sm_motd_url` 稍特殊:`motd-fixer` 会用 `FindConVar` 读它,但读不到就回退到 `cfg/motd.txt`、再回退到默认 MOTD 面板(见 `plugins/motd-fixer.sp` 的 `OpenMOTD()`)。所以**在你装上创建该 cvar 的插件之前,改它不会生效**,MOTD 实际走的是 `cfg/motd.txt`。
+- **只有在你把官方插件也停掉的情况下才会看到的 `Unknown command`**:`cfg/server.cfg` 第 58 / 85 / 99
+  行用 `sm_say` 播报,而 `sm_say` 由官方插件 `basechat.smx` 提供。BMAG 不含 `basechat`,但
+  SourceMod 自带且默认启用 —— **官方插件保持启用就不会有这个报错**;若你手工停用了 `basechat`,
+  这三行会报 `Unknown command: sm_say`,可删可留。
+  `configs/adminmenu_sorting.txt` 里列着的 `sm_kick` / `sm_ban` / `sm_slay` 等条目同理,
+  那只是排序表,条目对应的命令不存在时会被忽略,无害。
 - **`configs/admins.cfg` 里的 SteamID 是占位值**,部署前必须换成真实 SteamID。
+  这个文件由官方插件 `admin-flatfile.smx` 读取(SourceMod 自带、默认启用),BMAG 不参与 ——
+  只要它没被停用,改完就生效。
