@@ -1,5 +1,11 @@
-# merge.py 的中间产物,源码在 src/scripting/plugins/(可从 merge.py 重组,不入库)
-smx_analysis/src/scripting/BMAG/*.sp
+# 构建产物:整个目录都是 merge.py / spcomp 生成的
+# (BMAG.sp 与各模块副本由 merge.py 重组,BMAG.smx 由 spcomp 编译)
+# 源码在 smx_analysis/src/scripting/plugins/,成品不入库
+smx_analysis/src/scripting/BMAG/
+
+# 编译出的 BMAG.smx 同样不入库 —— 用本地构建或 CI artifact 产出后再放进部署树。
+# 只有这一份是生成的;同目录下另外 4 个第三方 .smx 是要分发的二进制,照常入库。
+bms/addons/sourcemod/plugins/BMAG.smx
 
 # 自定义准星客户端 mod(暂时搁置,暂不入库)
 client_mod/
@@ -11,3 +17,8 @@ __pycache__/
 # 备份文件
 *.bak
 *.orig
+
+# CI 构建产物:由 .github/workflows/build.yml 在 runner 上生成,
+# 本地复跑同一套命令时也会出现在这两个位置
+/dist/
+smx_analysis/build.log

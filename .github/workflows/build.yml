@@ -1,0 +1,160 @@
+name: build
+
+# Builds BMAG.smx from source and uploads it as a workflow artifact.
+#
+# Design notes
+# ------------
+# * windows-latest on purpose: the pinned toolchain is the Windows spcomp.exe
+#   committed under smx_analysis/dl/sm-win/ (SourcePawn 1.11.0.6608).  Using the
+#   vendored compiler keeps it in lockstep with the committed include/ - a
+#   downloaded compiler could drift and change the build.
+# * spcomp output is NOT byte-reproducible (embedded paths, timestamps, hash
+#   table order - see README section 5).  So CI must never gate on a hash
+#   comparison against the committed bms/addons/sourcemod/plugins/BMAG.smx; the
+#   gates are the module set, the absence of dangling in-merge symbols, and the
+#   warning baseline.
+# * The artifact is not published anywhere: no Release, no commit back.  Grab it
+#   from the run page.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push on the same ref makes the older run pointless.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Moving baselines.  Update these together with the "基线" line in README
+  # section 5 whenever a source change legitimately moves them.
+  WARN_BASELINE: "35"
+
+jobs:
+  build:
+    name: merge + spcomp
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check the vendored toolchain
+        working-directory: smx_analysis
+        shell: pwsh
+        run: |
+          $spcomp = "dl/sm-win/addons/sourcemod/scripting/spcomp.exe"
+          if (-not (Test-Path $spcomp)) {
+            Write-Error "spcomp not found at $spcomp - is dl/ still committed?"
+            exit 1
+          }
+          if (-not (Test-Path "src/scripting/include/sourcemod.inc")) {
+            Write-Error "include/ missing - the build needs the vendored SourceMod includes"
+            exit 1
+          }
+          Write-Host "toolchain present: $spcomp"
+
+      - name: Merge modules into BMAG.sp
+        working-directory: smx_analysis
+        shell: pwsh
+        run: |
+          python merge.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content src/scripting/BMAG/BMAG.sp -TotalCount 3
+
+      - name: Compile BMAG.smx
+        working-directory: smx_analysis
+        shell: pwsh
+        run: |
+          $spcomp = "dl/sm-win/addons/sourcemod/scripting/spcomp.exe"
+          # Capture first, then tee: a cmdlet in the pipeline would clobber
+          # $LASTEXITCODE and hide a compiler failure.
+          $out  = & $spcomp -i "src/scripting/include" `
+                            -o "src/scripting/BMAG/BMAG.smx" `
+                            "src/scripting/BMAG/BMAG.sp" 2>&1
+          $code = $LASTEXITCODE
+          # Explicit encoding: Tee-Object / Out-File default to UTF-16LE on
+          # Windows PowerShell 5.1 but UTF-8 on pwsh 7.  (ci_check.py sniffs the
+          # BOM, so either is readable - this just keeps the log diffable.)
+          $out | Out-File -FilePath build.log -Encoding utf8
+          $out | Select-Object -Last 5
+          if ($code -ne 0) {
+            Write-Error "spcomp exited with $code"
+            exit $code
+          }
+
+      - name: Verify the build invariants
+        working-directory: smx_analysis
+        shell: pwsh
+        run: |
+          python ci_check.py `
+            --sp "src/scripting/BMAG/BMAG.sp" `
+            --log "build.log" `
+            --warn-baseline $env:WARN_BASELINE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage the artifact
+        shell: pwsh
+        run: |
+          # The artifact is a COMPLETE deployment package: the repo's whole bms/
+          # tree plus the BMAG.smx built in this run, which is the one file bms/
+          # does not carry (it is gitignored - see README section 3/5).
+          # Unpacking it over %SRV%\ is therefore a full deployment on its own.
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse -Force bms dist/bms
+          $stage = "dist/bms/addons/sourcemod/plugins"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item smx_analysis/src/scripting/BMAG/BMAG.smx "$stage/BMAG.smx" -Force
+          Copy-Item smx_analysis/build.log dist/build.log
+          Get-ChildItem dist -Recurse -File | ForEach-Object {
+            "{0,8}  {1}" -f $_.Length, $_.FullName.Substring((Resolve-Path dist).Path.Length + 1)
+          }
+
+      - name: Upload BMAG.smx
+        uses: actions/upload-artifact@v4
+        with:
+          name: BMAG-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $smx = "smx_analysis/src/scripting/BMAG/BMAG.smx"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## BMAG build"
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY "Artifact = repo ``bms/`` + the BMAG.smx built above."
+          Add-Content $env:GITHUB_STEP_SUMMARY "**Unpack it over ``%SRV%\`` and that is a full deployment.**"
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          Add-Content $env:GITHUB_STEP_SUMMARY "BMAG-<sha>.zip"
+          Add-Content $env:GITHUB_STEP_SUMMARY "|- bms/                       <- whole deployment tree"
+          Add-Content $env:GITHUB_STEP_SUMMARY "|  |- addons/sourcemod/plugins/BMAG.smx   <- built by this run"
+          Add-Content $env:GITHUB_STEP_SUMMARY "|  |- addons/sourcemod/plugins/           <- 4 third-party .smx + disabled/"
+          Add-Content $env:GITHUB_STEP_SUMMARY "|  |- addons/sourcemod/{configs,translations,extensions}/"
+          Add-Content $env:GITHUB_STEP_SUMMARY "|  '- cfg/"
+          Add-Content $env:GITHUB_STEP_SUMMARY "'- build.log                 <- compiler output, ignore when deploying"
+          Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          if (Test-Path $smx) {
+            $size = (Get-Item $smx).Length
+            $sha  = (Get-FileHash $smx -Algorithm SHA256).Hash
+            Add-Content $env:GITHUB_STEP_SUMMARY "- ``BMAG.smx``: $size bytes"
+            Add-Content $env:GITHUB_STEP_SUMMARY "- sha256: ``$sha``"
+          } else {
+            Add-Content $env:GITHUB_STEP_SUMMARY "- no BMAG.smx produced"
+          }
+          Add-Content $env:GITHUB_STEP_SUMMARY "- warning baseline: $env:WARN_BASELINE"
+          Add-Content $env:GITHUB_STEP_SUMMARY ""
+          Add-Content $env:GITHUB_STEP_SUMMARY "> No BMAG.smx is committed to the repo (spcomp output is not byte-reproducible,"
+          Add-Content $env:GITHUB_STEP_SUMMARY "> so storing one would only mean a binary diff on every rebuild). This artifact"
+          Add-Content $env:GITHUB_STEP_SUMMARY "> is the ready-made build; the repo's ``bms/`` tree alone has no BMAG.smx in it."

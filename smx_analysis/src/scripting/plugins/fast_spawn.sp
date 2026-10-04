@@ -56,12 +56,15 @@ public void OnConfigsExecuted()
 //
 //   * 单人战役里死亡 = 读档, 不是重生。零秒重生会把玩家从刚读的档里拽出来,
 //     剥武器更会直接毁掉手上的装备。
-//   * FS_OnTakeDamage 的「致死前先剥武器」是为 DM 的武器掉落问题写的。BMAG 与
-//     tau_mp 都挂 SDKHook_OnTakeDamage, 回调按 SDKHook() 注册顺序=插件加载顺序
-//     执行, 而 BMAG 字母序在前 → 它看到的是**未经 tau_mp 跌落伤害封顶**的原始
-//     伤害。于是「高空落地本来最多只掉 10 HP」被 BMAG 判成致死, 武器先被
-//     RemoveEntity 掉, tau_mp 再把伤害压到 10 → 玩家活着但两手空空。
+//   * FS_OnTakeDamage 的「致死前先剥武器」是为 DM 的武器掉落问题写的。它有一个
+//     前提: 判致死用的必须已经是**最终**伤害。若场上还有别的插件也挂
+//     SDKHook_OnTakeDamage 做伤害减免(例如把跌落伤害封顶), 回调按 SDKHook()
+//     注册顺序 = 插件加载顺序执行, 字母序在前的 BMAG 会先看到**未减免**的原始
+//     伤害 → 「高空落地本来最多只掉 10 HP」被误判成致死, 武器先被 RemoveEntity,
+//     那个插件随后才把伤害压下去 → 玩家活着但两手空空。
 //     实测现象就是「跌落伤害过大致死时武器模型消失」。
+//     与任何具体插件无关, 是加载顺序决定的通用风险; 战役地图整张图关掉本插件
+//     (见下)正是为了绕开这一类跨插件冲突。
 //
 // 判据: 战役地图全部形如 bm_c<数字>*(bm_c0a0a … bm_c5a1a); DM 侧地图是
 // dm_*/de_*/bm_bunnyrace_beta2, **没有任何地图以 bm_c<数字> 开头**, 所以前缀
@@ -245,8 +248,8 @@ void FS_ClearNoTarget(any iUserID)
 // 死亡被保留"(PlayerDeathThink 被 Spawn 的 SetThink(NULL) 取消、RemoveAllItems
 // 没跑)的问题, 让重生回到 HL2DM 正常语义: 死后武器清空、重生刷默认装备。
 // 只在 FS_Active() 为真时生效 —— 比赛期 bms_match 把 sm_fastspawn 置 0(保留正常
-// 掉落/拾取), 单人战役由 FS_Campaign() 关掉(这条剥武器正是「跌落致死时武器模型
-// 消失」的元凶: 它在 tau_mp 把跌落伤害压到 10 HP 之前就判了致死)。
+// 掉落/拾取), 单人战役由 FS_Campaign() 关掉(这条剥武器在「别的插件做伤害减免」
+// 时会把减免前的原始伤害误判成致死, 见文件头那段说明)。
 public Action FS_OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
 {
 	if (!FS_Active())
