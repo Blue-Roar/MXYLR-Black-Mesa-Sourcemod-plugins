@@ -76,6 +76,7 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 | `bms/addons/sourcemod/configs/advertisements.txt` | 两条 `chat` 文案 | 原服的群号和 B 站账号,换成你的 |
 | `bms/addons/sourcemod/configs/bms_match.cfg` | `SourceTV` → `DownloadBase` | 改成你的地址,或留空 `""`(录像仍会录,只是下载链接不可用) |
 | `bms/cfg/mapcycle_ffa.txt`、`bms/cfg/mapcycle_tdm.txt` | 地图名单 | 删掉你服务器上**没有**的地图,否则换图失败 |
+| `bms/cfg/server.cfg` | `sm_bms_webpanel_url`(**需自行加这一行**) | 把网页面板藏到你已备案的 HTTPS 域名后面,见[网页面板走反代部署](#网页面板走反代部署iis--nginx)。不加的话 `!panel` 的地址会是 `http://127.0.0.1:28015`,公网玩家打不开 |
 
 **本仓库不再附带 SourceMod 自身的配置文件** —— 管理员名单、`core.cfg`、`admin_levels/groups/overrides`、
 `maplists.cfg`、`geoip/`、`sql-init-scripts/`、`adminmenu_*.txt` 等都属于 SourceMod 官方安装的一部分,
@@ -284,6 +285,83 @@ xcopy /E /Y /I bms  %SRV%\bms\
 **新增**的独立插件(如 `is_bms_fix_timelimit`)SourceMod 只在地图切换时才自动加载,
 要么换一次图,要么控制台 `sm plugins load is_bms_fix_timelimit`。
 
+### 网页面板走反代部署(IIS / nginx)
+
+面板本身是个**裸 HTTP 服务**(`http://ip:28015`)。在国内机房,这种"无备案域名的公网 HTTP"
+容易被阻断,而且它会把面板、`/status` 和明文 token 直接暴露到公网。
+
+**推荐做法:让面板只监听回环,由你已备案的站点(HTTPS)反代过去。**
+
+插件侧只需要两个 cvar:
+
+```cfg
+sm_bms_webpanel_bind "127.0.0.1"                    // 默认值,别改;面板不再对外监听
+sm_bms_webpanel_port "28015"                        // 内部监听端口,可按需改(改完即时重绑)
+sm_bms_webpanel_url  "https://panel.example.com"    // 玩家浏览器看到的地址(备案域名)
+```
+
+`sm_bms_webpanel_url` 会同时用于页面里的 `__BASE__` 和 `!panel` 打开的 MOTD 地址 ——
+设了它,对内是 `http://<bind>:<port>`,对外是 HTTPS 域名,两边各司其职。
+内部端口随便改(比如和别的服务撞了):反代那边把 `proxy_pass` / `Rewrite` 的目标端口同步改掉即可,
+**对外的 URL 不受影响**。
+
+#### IIS(ARR + URL Rewrite)
+
+前置:装 **Application Request Routing** 与 **URL Rewrite**,并在
+*IIS 管理器 → 服务器节点 → Application Request Routing Cache → Server Proxy Settings*
+里勾上 **Enable proxy**。
+
+站点的 `web.config`(整站反代到面板,用子域名最省事):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="BMAG panel" stopProcessing="true">
+          <match url="(.*)" />
+          <action type="Rewrite" url="http://127.0.0.1:28015/{R:1}" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
+```
+
+想挂在**子路径**(如 `https://site.example.com/bms/`)也行,规则里把前缀剥掉即可:
+
+```xml
+<rule name="BMAG panel under /bms" stopProcessing="true">
+  <match url="^bms/(.*)" />
+  <action type="Rewrite" url="http://127.0.0.1:28015/{R:1}" />
+</rule>
+```
+
+对应的 `sm_bms_webpanel_url` 写 `https://site.example.com/bms`(基址不带结尾斜杠也可,插件会自己去掉)。
+
+#### nginx
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:28015;   # 结尾不加斜杠 → 路径原样透传
+    proxy_set_header Host $host;
+    proxy_read_timeout 5s;
+}
+```
+
+#### 反代之后顺手能做的事
+
+| 想做的事 | 怎么做 |
+|---|---|
+| 挡掉无鉴权的 `/status` | IIS:给 `/status` 加一条 `<action type="CustomResponse" statusCode="403" />` 的规则;nginx:`location = /status { deny all; }` |
+| 限流(token 端点防刷) | nginx `limit_req`;IIS 用 Dynamic IP Restrictions |
+| TLS | 用你已备案域名签发的证书终结在反代上,插件侧永远是明文回环 |
+
+> **前置条件:反代进程必须能访问游戏服的 `127.0.0.1:28015`** —— 也就是**同一台机器**。
+> 如果反代在别的机器上,先架隧道(WireGuard / `ssh -L` / frp),再把 `sm_bms_webpanel_bind`
+> 指到隧道在本机的地址(而不是 `0.0.0.0`,别把面板重新暴露出去)。
+
 ### 启动
 
 ```bat
@@ -374,9 +452,14 @@ RCON_HOST=127.0.0.1 RCON_PORT=27015 RCON_PASSWORD='<你的rcon密码>' python sm
 
 | ConVar | 默认 | 说明 |
 |---|---|---|
-| `sm_bms_webpanel_enabled` | 1 | 启用游戏内网页控制台(需要 socket 扩展) |
-| `sm_bms_webpanel_host` | *(空)* | 面板 URL 中使用的 Host,留空 = `127.0.0.1` |
-| `sm_bms_webpanel_port` | 28015 | 网页控制台监听端口 |
+| `sm_bms_webpanel_enabled` | 1 | 启用游戏内网页控制台(需要 socket 扩展)。**改这个会立即停/起监听** |
+| `sm_bms_webpanel_url` | *(空)* | **面板对外的完整基址**,如 `https://panel.example.com`。走反代时设这个;留空则按下两行拼 `http://host:port` |
+| `sm_bms_webpanel_bind` | `127.0.0.1` | 监听地址。有反代在前面时**保持回环**;留空 = `127.0.0.1`。**改动即时重绑** |
+| `sm_bms_webpanel_host` | *(空)* | 仅当 `sm_bms_webpanel_url` 为空时使用:URL 里的 Host,留空 = `127.0.0.1` |
+| `sm_bms_webpanel_port` | 28015 | 监听端口。**改动即时重绑**,不需要 reload 插件 |
+
+> `_enabled` / `_bind` / `_port` 三个都挂了变更钩子:改完**立刻**拆掉旧监听并按新设置重新绑定,
+> 下次地图加载时 `server.cfg` 里设的值也会自动生效。`_url` / `_host` 只是拼 URL 用的,每次请求现读,同样不用 reload。
 
 ### 命令监听(拦截引擎命令)
 

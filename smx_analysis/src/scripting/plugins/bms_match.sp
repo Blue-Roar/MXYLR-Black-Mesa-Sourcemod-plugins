@@ -197,6 +197,8 @@ bool gBmsVoiceAnnounce;
 ConVar gBmsWebEnabled;
 ConVar gBmsWebPort;
 ConVar gBmsWebHost;
+ConVar gBmsWebUrl;
+ConVar gBmsWebBind;
 Socket gBmsWebListen;
 char gBmsWebToken[MAXPLAYERS + 1][40];
 char gBmsWebHtml[16384];
@@ -4486,8 +4488,10 @@ void Bms_RegisterCommands()
  *   - Each endpoint is a small HTTP/1.1 GET with no body, so the request is
  *     assumed to arrive in a single receive callback (one TCP segment in
  *     practice).  No per-connection buffering.
- *   - Port / host changes take effect on `sm plugins reload merged` (the
- *     listener is bound at plugin load, before server.cfg re-runs per map).
+ *   - The listener address is re-bound the moment sm_bms_webpanel_port /
+ *     _bind / _enabled change (see Bms_WebPanel_OnListenSettingsChanged), so
+ *     no plugin reload is needed.  They are still read once at plugin load to
+ *     bring the listener up.
  *************************************************************/
 
 void Bms_WebPanel_GetQuery(const char[] sQuery, const char[] sKey, char[] sOut, int iMaxLen)
@@ -4706,10 +4710,8 @@ void Bms_WebPanel_ServePage(Socket socket, int iClient, const char[] sToken)
 	// zero JavaScript.  Every page load — the initial !panel, the <meta refresh>
 	// auto-reload, and the 302 bounce after a command — carries fresh state, so
 	// the in-game browser never needs fetch/XHR (which it renders unreliably).
-	char sHost[128];
-	Bms_WebPanel_GetHost(sHost, sizeof(sHost));
-	char sBase[160];
-	FormatEx(sBase, sizeof(sBase), "http://%s:%d", sHost, gBmsWebPort.IntValue);
+	char sBase[192];
+	Bms_WebPanel_GetBase(sBase, sizeof(sBase));
 
 	char sStateText[32], sStateClass[32];
 	Bms_WebPanel_StateDisplay(gBmsRound.iState, sStateText, sizeof(sStateText), sStateClass, sizeof(sStateClass));
@@ -4975,6 +4977,38 @@ void Bms_WebPanel_GetHost(char[] out, int maxlen)
 	strcopy(out, maxlen, "127.0.0.1");
 }
 
+/**
+ * Base URL the in-game browser must use.  When sm_bms_webpanel_url is set it
+ * wins outright (scheme + host [+ optional path]), which is what lets the panel
+ * sit behind a reverse proxy on an HTTPS domain instead of being reached
+ * directly on the raw http://ip:port listener.  Otherwise the legacy
+ * http://<host>:<port> form is built from the host/port cvars.
+ */
+void Bms_WebPanel_GetBase(char[] out, int maxlen)
+{
+	char sCfg[192];
+	gBmsWebUrl.GetString(sCfg, sizeof(sCfg));
+	TrimString(sCfg);
+
+	// Tolerate a trailing slash so "https://panel.example.com/" and
+	// "https://panel.example.com" both yield links without a double slash.
+	int iLen = strlen(sCfg);
+	while (iLen > 0 && sCfg[iLen - 1] == '/')
+	{
+		sCfg[--iLen] = '\0';
+	}
+
+	if (sCfg[0])
+	{
+		strcopy(out, maxlen, sCfg);
+		return;
+	}
+
+	char sHost[128];
+	Bms_WebPanel_GetHost(sHost, sizeof(sHost));
+	FormatEx(out, maxlen, "http://%s:%d", sHost, gBmsWebPort.IntValue);
+}
+
 void Bms_WebPanel_OnError(Socket socket, const int errorType, const char[] errorMsg, any data)
 {
 	LogMessage("[bms_match] web panel socket error %d: %s", errorType, errorMsg);
@@ -5078,11 +5112,10 @@ public Action BmsCmd_Panel(int iClient, int iArgs)
 	}
 
 	Bms_WebPanel_NewToken(iClient);
-	char sHost[128];
-	Bms_WebPanel_GetHost(sHost, sizeof(sHost));
-	int iPort = gBmsWebPort.IntValue;
-	char sUrl[256];
-	FormatEx(sUrl, sizeof(sUrl), "http://%s:%d/panel?token=%s", sHost, iPort, gBmsWebToken[iClient]);
+	char sBase[192];
+	Bms_WebPanel_GetBase(sBase, sizeof(sBase));
+	char sUrl[320];
+	FormatEx(sUrl, sizeof(sUrl), "%s/panel?token=%s", sBase, gBmsWebToken[iClient]);
 	ShowMOTDPanel(iClient, sTitle, sUrl, MOTDPANEL_TYPE_URL);
 	return Plugin_Handled;
 }
@@ -5101,9 +5134,16 @@ void Bms_WebPanel_StartServer()
 	}
 	sock.SetOption(SocketReuseAddr, 1);
 	int iPort = gBmsWebPort.IntValue;
-	if (!sock.Bind("0.0.0.0", iPort))
+	char sBind[64];
+	gBmsWebBind.GetString(sBind, sizeof(sBind));
+	TrimString(sBind);
+	if (!sBind[0])
 	{
-		LogError("[bms_match] web panel: bind 0.0.0.0:%d failed", iPort);
+		strcopy(sBind, sizeof(sBind), "127.0.0.1");
+	}
+	if (!sock.Bind(sBind, iPort))
+	{
+		LogError("[bms_match] web panel: bind %s:%d failed", sBind, iPort);
 		delete sock;
 		return;
 	}
@@ -5116,7 +5156,37 @@ void Bms_WebPanel_StartServer()
 		return;
 	}
 	gBmsWebListen = sock;
-	PrintToServer("[bms_match] web panel: listening on 0.0.0.0:%d", iPort);
+	PrintToServer("[bms_match] web panel: listening on %s:%d", sBind, iPort);
+}
+
+// Closes the listening socket.  Socket is a Handle-backed methodmap, so
+// `delete` is what shuts the listener down (same call the failure paths above
+// use).  Connections already accepted are independent handles and keep running.
+void Bms_WebPanel_StopServer()
+{
+	if (gBmsWebListen != null)
+	{
+		delete gBmsWebListen;
+		gBmsWebListen = null;
+	}
+}
+
+// sm_bms_webpanel_port / _bind / _enabled were previously only read once at
+// plugin load, so changing them needed `sm plugins reload BMAG`.  Rebind on
+// change instead: the listener is torn down and brought back up with the new
+// settings.  A value that is merely re-set to the same number by server.cfg at
+// map start does not fire this hook, so public servers do not rebind per map.
+public void Bms_WebPanel_OnListenSettingsChanged(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+	Bms_WebPanel_StopServer();
+	if (gBmsWebEnabled.BoolValue)
+	{
+		Bms_WebPanel_StartServer();
+	}
+	else
+	{
+		PrintToServer("[bms_match] web panel: disabled by sm_bms_webpanel_enabled");
+	}
 }
 
 void Bms_WebPanel_Init()
@@ -5125,7 +5195,14 @@ void Bms_WebPanel_Init()
 
 	gBmsWebEnabled = CreateConVar("sm_bms_webpanel_enabled", "1", "Enable the in-game web control panel (needs the socket extension)", FCVAR_NOTIFY);
 	gBmsWebPort = CreateConVar("sm_bms_webpanel_port", "28015", "HTTP port for the web control panel", FCVAR_NONE);
-	gBmsWebHost = CreateConVar("sm_bms_webpanel_host", "", "Host/IP used in the panel URL (empty = 127.0.0.1)", FCVAR_NONE);
+	gBmsWebHost = CreateConVar("sm_bms_webpanel_host", "", "Host/IP used in the panel URL when sm_bms_webpanel_url is empty (empty = 127.0.0.1)", FCVAR_NONE);
+	gBmsWebUrl = CreateConVar("sm_bms_webpanel_url", "", "Public base URL of the panel, e.g. https://panel.example.com - set this when the panel is reached through a reverse proxy (empty = build http://host:port)", FCVAR_NONE);
+	gBmsWebBind = CreateConVar("sm_bms_webpanel_bind", "127.0.0.1", "Address the panel listener binds to. Keep it loopback when a reverse proxy fronts the panel (empty = 127.0.0.1)", FCVAR_NONE);
+
+	// These three re-bind the listener the moment they change (no plugin reload).
+	HookConVarChange(gBmsWebEnabled, Bms_WebPanel_OnListenSettingsChanged);
+	HookConVarChange(gBmsWebPort, Bms_WebPanel_OnListenSettingsChanged);
+	HookConVarChange(gBmsWebBind, Bms_WebPanel_OnListenSettingsChanged);
 
 	RegConsoleCmd("panel", BmsCmd_Panel, "Open the in-game web control panel");
 	RegConsoleCmd("webpanel", BmsCmd_Panel, "Open the in-game web control panel");
