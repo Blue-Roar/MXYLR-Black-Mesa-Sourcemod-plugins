@@ -131,7 +131,9 @@ public int MenuHandler_DoNothing(Menu menu, MenuAction action, int param1, int p
 public Action Timer_DisplayAd(Handle timer, Handle data)
 {
     if (!g_hEnabled.BoolValue) {
-        return;
+        // Action-returning timer callback: a bare `return;` is an error as of
+        // SourcePawn 1.12 (was a warning). Plugin_Continue keeps the timer.
+        return Plugin_Continue;
     }
 
     Advertisement ad;

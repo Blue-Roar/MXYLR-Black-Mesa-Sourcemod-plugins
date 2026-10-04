@@ -1,7 +1,7 @@
 #!/bin/bash
-# Compile every .sp in plugins/ with spcomp 1.11.0.6608
+# Compile every .sp in plugins/ with spcomp 1.12.0.7255
 cd "$(dirname "$0")"
-SPCOMP="/c/tmp/smx_analysis/dl/sm-win/addons/sourcemod/scripting/spcomp.exe"
+SPCOMP="/c/tmp/smx_analysis/dl/spcomp.exe"
 mkdir -p out
 pass=0; fail=0
 cd plugins

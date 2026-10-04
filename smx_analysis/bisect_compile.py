@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, r"C:\tmp\smx_analysis")
 import merge as M
 
-SPCOMP = r"C:\tmp\smx_analysis\dl\sm-win\addons\sourcemod\scripting\spcomp.exe"
+SPCOMP = r"C:\tmp\smx_analysis\dl\spcomp.exe"
 PARTIAL = r"C:\tmp\smx_analysis\partial.sp"
 OUTSMX = r"C:\tmp\smx_analysis\partial.smx"
 

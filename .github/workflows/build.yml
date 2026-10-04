@@ -1,11 +1,11 @@
-name: build
+﻿name: build
 
 # Builds BMAG.smx from source and uploads it as a workflow artifact.
 #
 # Design notes
 # ------------
 # * windows-latest on purpose: the pinned toolchain is the Windows spcomp.exe
-#   committed under smx_analysis/dl/sm-win/ (SourcePawn 1.11.0.6608).  Using the
+#   committed under smx_analysis/dl/ (SourcePawn 1.12.0.7255).  Using the
 #   vendored compiler keeps it in lockstep with the committed include/ - a
 #   downloaded compiler could drift and change the build.
 # * spcomp output is NOT byte-reproducible (embedded paths, timestamps, hash
@@ -30,7 +30,7 @@ concurrency:
 env:
   # Moving baselines.  Update these together with the "基线" line in README
   # section 5 whenever a source change legitimately moves them.
-  WARN_BASELINE: "35"
+  WARN_BASELINE: "26"
 
 jobs:
   build:
@@ -50,7 +50,7 @@ jobs:
         working-directory: smx_analysis
         shell: pwsh
         run: |
-          $spcomp = "dl/sm-win/addons/sourcemod/scripting/spcomp.exe"
+          $spcomp = "dl/spcomp.exe"
           if (-not (Test-Path $spcomp)) {
             Write-Error "spcomp not found at $spcomp - is dl/ still committed?"
             exit 1
@@ -73,7 +73,7 @@ jobs:
         working-directory: smx_analysis
         shell: pwsh
         run: |
-          $spcomp = "dl/sm-win/addons/sourcemod/scripting/spcomp.exe"
+          $spcomp = "dl/spcomp.exe"
           # Capture first, then tee: a cmdlet in the pipeline would clobber
           # $LASTEXITCODE and hide a compiler failure.
           $out  = & $spcomp -i "src/scripting/include" `

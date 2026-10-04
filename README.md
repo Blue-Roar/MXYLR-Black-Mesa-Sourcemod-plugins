@@ -139,14 +139,15 @@ Black Mesa(黑山起源)的 **SourceMod 插件与配置集合**,整理自一台�
 │   ├── *.ps1                     启动/崩溃诊断辅助脚本(check_crash、evt、proc、
 │   │                             test_launch、watch_launch)
 │   ├── REVERSE_*.md              引擎逆向笔记(见下)
-│   ├── dl/sm-win/                下载的 SourceMod 工具链(含 spcomp.exe)
+│   ├── dl/spcomp.exe             SourcePawn 编译器 1.12.0.7255(从官方 SourceMod 包取出,
+│   │                             只留构建所需的这一个文件)
 │   ├── out/                      逆向与探测过程留下的证据 dump(probe*.txt、
 │   │                             crosshair_*、wpn_dump、*_binscan 等)
 │   ├── .gitignore                本目录的忽略规则
 │   └── src/scripting/            纯构建输入
 │       ├── plugins/              **只在编的 16 个模块**的源码(其余已删除,见文首)
-│       ├── include/              编译用 SourceMod include(与官方包逐字节一致;
-│       │                         另有官方包没有的 dhooks.inc、updater.inc)
+│       ├── include/              编译用 SourceMod include = 官方 1.12.0.7255 原样
+│       │                         (唯一额外文件是 socket.inc,官方包不含 socket)
 │       ├── BMAG/                 merge.py / spcomp 的产物目录 —— **整个目录不入库**
 │       └── compile_all.sh        逐个编译 plugins/*.sp 的批处理脚本(路径硬编码,见上)
 └── README.md
@@ -252,9 +253,10 @@ xcopy /E /Y /I bms  %SRV%\bms\
 
 > **`socket.ext.dll` 是硬依赖,别漏。** `BMAG.smx` 对 socket 扩展是 `autoload = 1` / `required = 1`
 > —— 缺了它 BMAG 会直接加载失败(`Unable to load plugin … Required extension "Socket" is not
-> running`)。socket 是 AlliedModders 上单独分发的扩展([发布帖](https://forums.alliedmods.net/showthread.php?t=67640)),
-> **不保证随 SourceMod 包自带**,所以仓库里放了一份(`bms/addons/sourcemod/extensions/socket.ext.dll`)。
-> 如果你的 SourceMod 装好后就带这个文件,它会被同版本覆盖,无副作用;确认自带的话也可以删掉这份。
+> running`)。socket 是 AlliedModders 上**单独分发**的扩展([发布帖](https://forums.alliedmods.net/showthread.php?t=67640)),
+> **官方 SourceMod 包确实不含它** —— 1.12.0.7255 的 `extensions/` 里没有 `socket.ext.dll`,
+> `.inc` 也不含 `socket.inc`(已核对),所以仓库必须自己带这一份
+> (`bms/addons/sourcemod/extensions/socket.ext.dll`)。**别删。**
 
 > 除 `BMAG.smx` 外的四个 `.smx` 是**独立第三方插件,不在 BMAG 里**(清单见
 > [四、独立插件](#四独立插件))。其中 `is_weaponfx.smx` 需在 `server.cfg` 里显式设
@@ -598,7 +600,8 @@ BMAG 只负责 SourceMod 不自带的那部分:自研模块([一](#一bms_match-
 
 | 依赖 | 类型 | 说明 |
 |---|---|---|
-| `clientprefs.ext` / `geoip.ext` / `sdktools.ext` / `sdkhooks.ext` / `socket.ext` | 扩展,硬依赖 | SourceMod 自带,永远存在 |
+| clientprefs.ext / geoip.ext / sdktools.ext / sdkhooks.ext | 扩展,硬依赖 | SourceMod 官方包自带(1.12 已核对) |
+| socket.ext | 扩展,**硬依赖** | ⚠️ **官方包不含**,必须随本仓库分发(见部署一节) |
 | `mapchooser` | 插件库,**软依赖**(`required = 0`) | `merge.py` 在 `#include <mapchooser>` 前 `#undef REQUIRE_PLUGIN`,使 `SharedPlugin` 块编译成 `required = 0` 并让 include 生成 `__pl_mapchooser_SetNTVOptional()`,把 9 个 mapchooser native 全部标记为可选 |
 
 核对方式(可复现):解压 `BMAG.smx` 的 section 后,`adminmenu` / `basecomm` / `topmenus`
@@ -616,8 +619,8 @@ BMAG 只负责 SourceMod 不自带的那部分:自研模块([一](#一bms_match-
 | `basecomm.inc` | `file = "BMAG.smx"` | `file = "basecomm.smx"` |
 | `mapchooser.inc` | `file = "BMAG.smx"` | `file = "mapchooser.smx"` |
 
-现在这三个插件都在 BMAG 之外,补丁已还原,**`include/` 与官方包逐字节一致**
-(只多出 `dhooks.inc`、`updater.inc` 两个官方包没有的 include)。
+现在这三个插件都在 BMAG 之外,补丁已还原。**`include/` = 官方 SourceMod 1.12.0.7255 原样**,
+唯一额外文件是 `socket.inc`(官方包不含 socket 扩展,见部署一节)。
 
 > ⚠️ **把官方插件重新加回 `MODULES` 之前先读这段**。合并编译会把模块对
 > `adminmenu.inc` / `mapchooser.inc` native 的调用改写成对**同一插件内**对应模块函数的直接调用,
@@ -727,18 +730,37 @@ cd smx_analysis
 python merge.py          # 生成 src/scripting/BMAG/BMAG.sp(16 模块合并)
 ```
 
-然后用 spcomp 编译(编译器随仓库放在 `dl/sm-win/` 下):
+然后用 spcomp 编译(编译器随仓库放在 `dl/` 下):
 
 ```bash
-./dl/sm-win/addons/sourcemod/scripting/spcomp.exe \
+./dl/spcomp.exe \
   -i "src/scripting/include" \
   -o "src/scripting/BMAG/BMAG.smx" \
   "src/scripting/BMAG/BMAG.sp"
 ```
 
-基线:**35 个警告、0 个错误**(第二批清理把官方插件移出后是 35,移出前是 48,
+基线:**26 个警告、0 个错误**(升到 SourceMod 1.12 之前是 35;第二批清理把官方插件移出前是 48,
 删掉 SourceBans++ 之前是 50)。
-这套命令已于 2026-10-04 在本仓库复跑验证过,警告数与上述基线一致。
+这套命令已于 2026-10-04 在本仓库用 **1.12.0.7255** 复跑验证过,警告数与上述基线一致。
+
+### SDK 版本与升级记录
+
+**当前固定的是 SourceMod 官方最新稳定版 `1.12.0.7255`**(2026-10-02,即
+[`alliedmodders/sourcemod` 的 `releases/latest`](https://github.com/alliedmodders/sourcemod/releases) ——
+`1.13.0-git7475` 是更快的开发线但标为 prerelease,没有采用)。
+`smx_analysis/dl/` 里只留了 `spcomp.exe`(1.1 MB)—— 官方包其余内容(`bin/`、`extensions/`、
+`translations/`、官方插件源码)对构建没用,已不再入库;`src/scripting/include/` 就是官方 1.12 的原样 include。
+
+**从 1.11.0.6608 升上来时,1.12 的编译器收紧了两处检查,顺带暴露了两个一直藏在源码里的问题**(都已修好):
+
+| 位置 | 1.11 的表现 | 1.12 的表现 | 修法 |
+|---|---|---|---|
+| `textmsg_fix.sp` → `SafePrintHintTextAll()` | 静默容忍(该函数是死代码,从没被调用过) | `error 017: undefined symbol "PrintHintTextAll"` | 改成 SDK 里的正确名字 `PrintHintTextToAll` |
+| `advertisements.sp` → `Timer_DisplayAd()` | 仅 `warning 209: function should return a value` | `error 078: function uses both "return" and "return <value>"` | 裸 `return;` 改成 `return Plugin_Continue;` |
+
+> ⚠️ **升级 SDK 会抬高服务器端的最低版本。** 用 1.12 的 include 编出来的 `BMAG.smx` 可能引用
+> 1.11 没有的 native —— **部署前请把服务器上的 SourceMod 也升到 1.12**,否则 BMAG 会加载失败。
+> 「编译用的 `include/` 必须与生产服务器一致」这条从建议变成了硬要求。
 
 > **构建产物落在 `smx_analysis/src/scripting/BMAG/BMAG.smx`,该目录整体是 gitignore 的。**
 > 要让本地 `bms/` 部署树保持可用,把那一步产物拷过去:
@@ -768,8 +790,8 @@ BMAG-<sha>.zip
 > 放进 `bms/addons/sourcemod/plugins/`。所以**解压到 `%SRV%\` 就是一次完整部署**,
 > 不需要再单独拷 `bms/`(这正是仓库里不含 `BMAG.smx` 的补偿 —— 见[部署](#部署)方式 A)。
 
-用 windows runner 是有意的:仓库里固化的工具链 `smx_analysis/dl/sm-win/.../spcomp.exe`
-(SourcePawn 1.11.0.6608)是 Windows 可执行文件,原生跑即可,不需要 wine;用它而不是现下载编译器,
+用 windows runner 是有意的:仓库里固化的工具链 `smx_analysis/dl/.../spcomp.exe`
+(SourcePawn 1.12.0.7255)是 Windows 可执行文件,原生跑即可,不需要 wine;用它而不是现下载编译器,
 是为了让它与同样入库的 `include/` 严格对应。
 
 CI 的门禁由 `smx_analysis/ci_check.py` 提供,查三件编译器看不见的事:
@@ -778,7 +800,7 @@ CI 的门禁由 `smx_analysis/ci_check.py` 提供,查三件编译器看不见的
 |---|---|
 | 合并出的模块集 == 16 个预期模块 | BMAG 的设计前提是**不含任何官方插件**;万一有人把官方模块并回去,命令会与官方 `.smx` 重复注册 —— 那**只在服务器加载时才炸**,编译期完全看不出来 |
 | 不出现 `mod_adminmenu_` / `mod_basecomm_` / `mod_clientprefs_` / `mod_mapchooser_` / `mod_adminhelp_` | 这些是 `merge.py` 给同插件内模块加的符号前缀;出现即表示某个模块被移出 `MODULES` 但调用方没同步处理 |
-| 警告数 == 基线(35),且日志的汇总行与逐条明细自洽 | 警告数漂移往往意味着模块被误加/误删;汇总与明细一致则能挡住日志被截断 |
+| 警告数 == 基线(26),且日志的汇总行与逐条明细自洽 | 警告数漂移往往意味着模块被误加/误删;汇总与明细一致则能挡住日志被截断 |
 
 > 警告基线同时写在这里和 workflow 的 `WARN_BASELINE` 环境变量里 —— **有意改动导致警告数变化时,两处一起改**。
 > 另外 `ci_check.py` 会在读不出 `N Warnings.` 汇总时**直接判失败**而不是当成 0 警告,避免门禁被静默架空。

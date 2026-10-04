@@ -207,7 +207,8 @@ void SafePrintHintTextAll(const char[] format, any ...)
 	char buffer[512];
 	VFormat(buffer, sizeof(buffer), format, 2);
 	TextMsgFix_SafeTail(buffer, sizeof(buffer));
-	PrintHintTextAll("%s", buffer);
+	// SDK stock in halflife.inc.
+	PrintHintTextToAll("%s", buffer);
 }
 
 // ---- Game-sent TextMsg hook ----
