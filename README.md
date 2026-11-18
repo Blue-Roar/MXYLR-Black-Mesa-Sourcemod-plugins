@@ -73,7 +73,6 @@ Black Mesa (黑山起源)的 SourceMod **比赛服整合插件**
 │   │   │   ├── bms_weapon_tauStuckFix.smx 第三方:tau 低弹药卡枪修复
 │   │   │   ├── is_weaponfx.smx        第三方:武器动画预热
 │   │   │   ├── is_bms_fix_timelimit.smx 第三方:回合时限/倒计时修复
-│   │   │   ├── scores_hold.smx        自研:按住 TAB 显示记分板(需客户端绑键,见下)
 │   │   │   └── disabled/              停用插件(spawn_marker 共 1 个)
 │   │   ├── translations/          各插件短语文件(**运行时读取,不编进 BMAG.smx**)
 │   │   ├── configs/               **只放本项目自己的配置**:bms_match.cfg、
@@ -177,25 +176,17 @@ running`)。socket 是 AlliedModders 上**单独分发**的扩展([发布帖](ht
 > 插件侧的 `Bms_CleanupMap` 路径 —— 但**引擎层面的地图复位就失效了**,
 > 所以部署时务必把这个文件放到 `addons/sourcemod/gamedata/`。
 
-除 `BMAG.smx` 外的独立 `.smx` **不在 BMAG 里**(清单见
-[插件#四、独立插件](modules.md#四独立插件)):四个第三方插件 + 一个自研的 `scores_hold.smx`。
+除 `BMAG.smx` 外的四个 `.smx` 是**独立第三方插件,不在 BMAG 里**(清单见
+[插件#四、独立插件](modules.md#四独立插件))。
 其中 `is_weaponfx.smx` 需在 `server.cfg` 里显式设
 `is_weaponfix_saddr`(默认值会被当成"未配置"而自我禁用);`is_bms_fix_timelimit.smx`
 负责让 `mp_timelimit` 在新地图加载后仍能生效 —— 漏了它,非比赛期间的回合时限就不对。
 
-> **`scores_hold.smx` 需要客户端配合绑键。** 2026-11-17 的客户端更新在 `+showscores`
-> 的回调里加了一道 `g_pGameRules` 门,导致 TAB 完全没反应;而 `+showscores` 是纯客户端
-> 输入,服务端拦不到。所以让客户端把 TAB 绑到一对命令上:
->
-> ```
-> alias +bmscores "sm_scores_open"
-> alias -bmscores "sm_scores_close"
-> bind TAB +bmscores
-> ```
->
-> 服务端收到按/松就发 VGUIMenu `scores` show=1/0(并附带 `±showscores` 兜底)。
-> 关掉它就 `sm_scores_hold 0`。诊断用聊天命令:`!scores` / `!scoresall`。
-
+> **记分板(TAB)在当前客户端版本下是坏的,已放弃修复。**
+> 2026-11-17 的客户端更新在 `+showscores` 回调里加了一道 `g_pGameRules` 门,
+> 导致按 TAB 完全没反应;而 `+showscores` 是纯客户端输入,服务端既看不见按键也拦不住。
+> 曾尝试过服务端发 `VGUIMenu "scores"` 绕路(即已移除的 `scores_hold` 插件),
+> **实测无法打开记分板**,该插件及其源码已随上游一并删除。
 
 `translations/` 里那三份短语文件**是运行时读取的,不编进 `BMAG.smx`**
 (`bms_match.phrases.txt`、`fast_spawn.phrases.txt`、`spawn_marker.phrases.txt`)。
