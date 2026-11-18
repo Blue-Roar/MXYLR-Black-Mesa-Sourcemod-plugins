@@ -5238,12 +5238,31 @@ public void OnPluginStart()
 	gBmsCvar.mp_round_intermission_time = FindConVar("mp_round_intermission_time");
 	gBmsCvar.mapvote_endvote = FindConVar("sm_mapvote_endvote");
 	// CGameRules::SetState(int) SDKCall. this = g_pGameRules (auto), one int
-	// parameter (newState), void return. Fails to NULL on older/no-gamerules
-	// builds; Bms_EngineReset falls back to the plugin-side CleanupMap then.
-	StartPrepSDKCall(SDKCall_GameRules);
-	PrepSDKCall_SetVirtual(160);
-	PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);
-	gBmsCall_SetState = EndPrepSDKCall();
+	// parameter (newState), void return. The address comes from the gamedata
+	// signature so the vtable-slot shift between game builds is irrelevant;
+	// Bms_EngineReset falls back to the plugin-side CleanupMap when the
+	// gamedata file is missing or the signature no longer matches.
+	//
+	// 2026-11-17 的 server.dll 更新在 CGameRules 族里插入了 4 个新虚函数,
+	// SetState 从槽 160 移到槽 164 —— 写死槽位会在新版调用到错误的虚函数
+	// (行为不可预期,可能直接崩服)。详见 gamedata/bms_match.games.txt。
+	//
+	// NOTE: LoadGameConfigFile appends ".txt" verbatim (no ".games.txt"
+	// fallback), so the name must include the ".games" part.
+	Handle hSetStateConf = LoadGameConfigFile("bms_match.games");
+	Address pSetState = Address_Null;
+	if (hSetStateConf != INVALID_HANDLE)
+	{
+		pSetState = GameConfGetAddress(hSetStateConf, "CGameRules_SetState");
+		CloseHandle(hSetStateConf);
+	}
+	if (pSetState != Address_Null)
+	{
+		StartPrepSDKCall(SDKCall_GameRules);
+		PrepSDKCall_SetAddress(pSetState);
+		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);
+		gBmsCall_SetState = EndPrepSDKCall();
+	}
 	if (gBmsCall_SetState == INVALID_HANDLE)
 	{
 		LogError("[bms_match] SetState SDKCall unavailable - engine reset disabled");
